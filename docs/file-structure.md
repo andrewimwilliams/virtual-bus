@@ -17,74 +17,74 @@ virtual-bus/
         virtual_bus/
             __init__.py
 
-        config/
-            __init__.py
-            settings.py              # paths, run IDs, replay speed
+            config/
+                __init__.py
+                settings.py              # paths, run IDs, replay speed
 
-        schemas/
-            __init__.py
-            raw_frame.schema.json
-            signal.schema.json
-            event.schema.json
-            artifacts.schema.json    # metadata about model artifacts
+            schemas/
+                __init__.py
+                raw_frame.schema.json
+                signal.schema.json
+                event.schema.json
+                artifacts.schema.json    # metadata about model artifacts
 
-        bus/
-            __init__.py
-            backend.py               # BusBackend interface
-            inproc.py                # in-process implementation
-            types.py                 # Frame dataclass, enums, common types
+            bus/
+                __init__.py
+                backend.py               # BusBackend interface
+                inproc.py                # in-process implementation
+                types.py                 # Frame dataclass, enums, common types
 
-        generate/
-            __init__.py
-            scenarios.py             # baseline/anomalous scenario definitions
-            generator.py             # virtual node scheduling + emission
-            faults.py                # jitter, drops, bursts, ID flooding
+            generate/
+                __init__.py
+                scenarios.py             # baseline/anomalous scenario definitions
+                generator.py             # virtual node scheduling + emission
+                faults.py                # jitter, drops, bursts, ID flooding
 
-        observe/
-            __init__.py
-            observer.py              # passive subscriber + fan-out
-            timestamps.py            # timestamp policy (source vs capture)
+            observe/
+                __init__.py
+                observer.py              # passive subscriber + fan-out
+                timestamps.py            # timestamp policy (source vs capture)
 
-        storage/
-            __init__.py
-            raw_store.py             # frames.jsonl writer/reader
-            signal_store.py          # signals.jsonl writer/reader
-            event_store.py           # events.jsonl writer/reader
-            session.py               # run_id, metadata.json, hashing configs
+            storage/
+                __init__.py
+                raw_store.py             # frames.jsonl writer/reader
+                signal_store.py          # signals.jsonl writer/reader
+                event_store.py           # events.jsonl writer/reader
+                session.py               # run_id, metadata.json, hashing configs
 
-        replay/
-            __init__.py
-            replayer.py              # reads raw frames → re-emits deterministically
-            clock.py                 # real-time vs scaled time vs step mode
+            replay/
+                __init__.py
+                replayer.py              # reads raw frames → re-emits deterministically
+                clock.py                 # real-time vs scaled time vs step mode
 
-        normalize/
-            __init__.py
-            mapping.py               # ID → signal decode definitions
-            normalizer.py            # frame → signals
-            decode.py                # byte unpacking helpers
+            normalize/
+                __init__.py
+                mapping.py               # ID → signal decode definitions
+                normalizer.py            # frame → signals
+                decode.py                # byte unpacking helpers
 
-        offline/
-            __init__.py
-            dataset.py               # build training datasets from signals
-            train.py                 # train autoencoder / baseline model
-            calibrate.py             # thresholds, scoring params
-            evaluate.py              # metrics, comparison baseline vs anomalous
-            artifacts.py             # save/load model artifacts + metadata
+            offline/
+                __init__.py
+                dataset.py               # build training datasets from signals
+                train.py                 # train autoencoder / baseline model
+                calibrate.py             # thresholds, scoring params
+                evaluate.py              # metrics, comparison baseline vs anomalous
+                artifacts.py             # save/load model artifacts + metadata
 
-        analyze/
-            __init__.py
-            analyzer.py              # orchestrates rules + model scoring
-            rules.py                 # timing/rate rules
-            model.py                 # model inference wrapper (loads artifacts)
-            events.py                # event types, severity, formatting
+            analyze/
+                __init__.py
+                analyzer.py              # orchestrates rules + model scoring
+                rules.py                 # timing/rate rules
+                model.py                 # model inference wrapper (loads artifacts)
+                events.py                # event types, severity, formatting
 
-        dashboard/
-            __init__.py
-            api.py                   # local API
-            ui/                      # static frontend assets
-                index.html
-                app.js
-                styles.css
+            dashboard/
+                __init__.py
+                api.py                   # local API
+                ui/                      # static frontend assets
+                    index.html
+                    app.js
+                    styles.css
 
     scripts/
         run_live.py                  # generator → bus → observer → normalize → analyze
