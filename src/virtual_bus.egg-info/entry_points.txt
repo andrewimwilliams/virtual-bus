@@ -1,0 +1,2 @@
+[console_scripts]
+virtual-bus = virtual_bus.cli:main

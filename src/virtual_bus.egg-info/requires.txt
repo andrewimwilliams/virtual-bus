@@ -1,0 +1,13 @@
+pydantic>=2.0
+rich>=13.0
+click>=8.0
+
+[dev]
+pytest>=7.0
+pytest-asyncio>=0.21
+black>=23.0
+ruff>=0.1
+mypy>=1.0
+
+[viz]
+textual>=0.40
