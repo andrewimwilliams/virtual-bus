@@ -1,22 +1,26 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict
 import json
-import threading
+from pathlib import Path
+from typing import Any
 
 
 class JsonlWriter:
     def __init__(self, path: Path) -> None:
-        self.path = path
+        self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        self._f = self.path.open("w", encoding="utf-8", newline="\n")
 
-        # Truncate on startup for "fresh run" behavior
-        self.path.write_text("", encoding="utf-8")
+    def append(self, obj: dict[str, Any]) -> None:
+        self._f.write(json.dumps(obj) + "\n")
+        self._f.flush()
 
-    def append(self, obj: Dict[str, Any]) -> None:
-        line = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
-        with self._lock:
-            with self.path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
+    def close(self) -> None:
+        if not self._f.closed:
+            self._f.close()
+
+    def __enter__(self) -> "JsonlWriter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()

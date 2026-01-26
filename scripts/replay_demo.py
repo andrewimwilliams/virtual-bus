@@ -61,6 +61,9 @@ def main() -> None:
         if first_ts is not None and last_ts is not None:
             recorded_span_s = (last_ts - first_ts) / 1e9
 
+    normalizer.close()
+    analyzer.close()
+
     print("=== Replay complete ===")
     print(f"Frames replayed: {replayed} <- {infile}")
     print(f"Signals stored:  {normalizer.count} -> artifacts/signals.jsonl")

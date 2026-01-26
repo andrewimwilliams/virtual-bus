@@ -36,3 +36,6 @@ class Analyzer:
                 self.count += 1
 
         self._last = v
+
+    def close(self) -> None:
+        self.writer.close()

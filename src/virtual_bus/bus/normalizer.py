@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable
 
 from .types import Frame, Signal
 from .jsonl import JsonlWriter
 
+
+SignalSpec = tuple[str, int, str | None]
+SignalMap = dict[int, list[SignalSpec]]
 
 class Normalizer:
     # frame -> signals stage
@@ -14,7 +17,7 @@ class Normalizer:
     def __init__(
         self,
         artifacts_dir: Path,
-        mapping: Dict[int, List[Tuple[str, int, str]]],
+        mapping: SignalMap,
         publish_signal: Callable[[Signal], None],
     ) -> None:
         self.mapping = mapping
@@ -68,3 +71,6 @@ class Normalizer:
                 )
 
             self._emit(sig)
+
+    def close(self) -> None:
+        self.writer.close()
