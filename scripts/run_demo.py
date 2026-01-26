@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from virtual_bus.bus.inprocess import InProcessBus
+from virtual_bus.bus.bus import Bus
+from virtual_bus.bus.types import Frame, Signal
 from virtual_bus.bus.observer import Observer
 from virtual_bus.bus.generator import TrafficGenerator
 from virtual_bus.bus.normalizer import Normalizer
@@ -13,49 +14,27 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     artifacts_dir = root / "artifacts"
 
-    bus = InProcessBus()
+    frame_bus: Bus[Frame] = Bus()
+    signal_bus: Bus[Signal] = Bus()
 
-    # Raw frame store
+    # Raw frame capture
     observer = Observer(artifacts_dir)
-    bus.subscribe(observer.on_frame)
+    frame_bus.subscribe(observer.on_frame)
 
-    # Normalizer -> produces signals.jsonl
-    mapping = {
-        0x123: [("counter", 0, "count")],  # can_id 0x123, byte0 -> "counter"
-    }
-    normalizer = Normalizer(artifacts_dir, mapping)
-    bus.subscribe(normalizer.on_frame)
-
-    # Analyzer consumes signals, so call analyzer from normalizer output path
-    # Inline patch by wrapping normalizer.on_frame.
+    # Analyzer subscribes to signals
     analyzer = Analyzer(artifacts_dir, watch_signal="counter")
+    signal_bus.subscribe(analyzer.on_signal)
 
-    # Minimal slice replacing bus subscription for normalizer that calls analyzer
-    bus = InProcessBus()
-    bus.subscribe(observer.on_frame)
+    # Normalizer decodes frames into signals
+    mapping = {
+        0x123: [("counter", 0, "count")],
+    }
+    normalizer = Normalizer(artifacts_dir, mapping, publish_signal=signal_bus.publish)
+    frame_bus.subscribe(normalizer.on_frame)
 
-    def normalize_and_analyze(frame):
-        # Call normalizer and directly feed analyzer with the produced signals by re-decoding
-        normalizer.on_frame(frame)
-
-        # Re-decode just seen signal (minimal)
-        if frame.can_id == 0x123 and len(frame.data) >= 1:
-            from virtual_bus.bus.types import Signal
-            sig = Signal(
-                timestamp_ns=frame.timestamp_ns,
-                name="counter",
-                value=int(frame.data[0]),
-                units="count",
-                source_can_id=frame.can_id,
-                source_channel=frame.channel,
-                source_node=frame.source_node,
-            )
-            analyzer.on_signal(sig)
-
-    bus.subscribe(normalize_and_analyze)
-
+    # Generate traffic
     gen = TrafficGenerator(can_id=0x123, period_ms=20, fault_at=80)
-    sent = gen.run(bus.publish, duration_s=2.5)
+    sent = gen.run(frame_bus.publish, duration_s=2.5)
 
     print("=== Demo complete ===")
     print(f"Frames sent:    {sent}")

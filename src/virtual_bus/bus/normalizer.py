@@ -1,25 +1,35 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from .types import Frame, Signal
 from .jsonl import JsonlWriter
 
 
 class Normalizer:
-    # Minimal "frame -> signals" mapping.
+    # frame -> signals stage
     # mapping: can_id -> list of (signal_name, byte_index, units)
-
-    def __init__(self, artifacts_dir: Path, mapping: Dict[int, List[Tuple[str, int, str]]]) -> None:
+    
+    def __init__(
+        self,
+        artifacts_dir: Path,
+        mapping: Dict[int, List[Tuple[str, int, str]]],
+        publish_signal: Callable[[Signal], None],
+    ) -> None:
         self.mapping = mapping
+        self.publish_signal = publish_signal
         self.writer = JsonlWriter(artifacts_dir / "signals.jsonl")
         self.count = 0
+
+    def _emit(self, sig: Signal) -> None:
+        self.writer.append(sig.to_dict())
+        self.publish_signal(sig)
+        self.count += 1
 
     def on_frame(self, frame: Frame) -> None:
         specs = self.mapping.get(frame.can_id)
         if not specs:
-            # still emit an "unmapped" signal so pipeline stays visible
             sig = Signal(
                 timestamp_ns=frame.timestamp_ns,
                 name="UNMAPPED",
@@ -30,8 +40,7 @@ class Normalizer:
                 source_node=frame.source_node,
                 quality="UNMAPPED",
             )
-            self.writer.append(sig.to_dict())
-            self.count += 1
+            self._emit(sig)
             return
 
         for name, idx, units in specs:
@@ -58,5 +67,4 @@ class Normalizer:
                     source_node=frame.source_node,
                 )
 
-            self.writer.append(sig.to_dict())
-            self.count += 1
+            self._emit(sig)
