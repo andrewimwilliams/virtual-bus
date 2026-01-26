@@ -9,8 +9,11 @@ from virtual_bus.bus.generator import TrafficGenerator
 from virtual_bus.bus.normalizer import Normalizer
 from virtual_bus.bus.analyzer import Analyzer
 
+import time
+
 
 def main() -> None:
+    start = time.perf_counter()
     root = Path(__file__).resolve().parents[1]
     artifacts_dir = root / "artifacts"
 
@@ -36,11 +39,14 @@ def main() -> None:
     gen = TrafficGenerator(can_id=0x123, period_ms=20, fault_at=80)
     sent = gen.run(frame_bus.publish, duration_s=2.5)
 
+    elapsed = time.perf_counter() - start
+
     print("=== Demo complete ===")
     print(f"Frames sent:    {sent}")
     print(f"Frames stored:  {observer.count}  -> artifacts/frames.jsonl")
     print(f"Signals stored: {normalizer.count} -> artifacts/signals.jsonl")
     print(f"Events stored:  {analyzer.count}   -> artifacts/events.jsonl")
+    print(f"Elapsed time:   {elapsed:.3f} s") 
 
 
 if __name__ == "__main__":
