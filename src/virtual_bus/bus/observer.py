@@ -17,3 +17,6 @@ class Observer:
     def on_frame(self, frame: Frame) -> None:
         self.writer.append(frame.to_dict())
         self.count += 1
+
+    def close(self) -> None:
+        self.writer.close()
