@@ -60,12 +60,12 @@ def main() -> None:
     elapsed = time.perf_counter() - start
 
     print("=== Demo complete ===")
-    print(f"Mode:          {args.mode}")
-    print(f"Frames sent:   {sent}")
-    print(f"Frames stored: {observer.count}  -> {artifacts_dir / 'frames.jsonl'}")
-    print(f"Signals stored:{normalizer.count} -> {artifacts_dir / 'signals.jsonl'}")
-    print(f"Events stored: {analyzer.count}   -> {artifacts_dir / 'events.jsonl'}")
-    print(f"Elapsed time:  {elapsed:.3f} s")
+    print(f"Mode:             {args.mode}")
+    print(f"Frames sent:      {sent}")
+    print(f"Frames stored:    {observer.count}  -> {artifacts_dir / 'frames.jsonl'}")
+    print(f"Signals stored:   {normalizer.count} -> {artifacts_dir / 'signals.jsonl'}")
+    print(f"Events stored:    {analyzer.count}   -> {artifacts_dir / 'events.jsonl'}")
+    print(f"Elapsed time:     {elapsed:.3f} s")
 
 
 if __name__ == "__main__":
