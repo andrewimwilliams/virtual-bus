@@ -33,7 +33,7 @@ def _run_pipeline(frames_path: Path, artifacts_dir: Path, *, speed: float) -> di
     frame_bus: Bus[Frame] = Bus()
     signal_bus: Bus[Signal] = Bus()
 
-    analyzer = Analyzer(artifacts_dir, watch_signal="counter")
+    analyzer = Analyzer(artifacts_dir, watch_signals="counter")
     signal_bus.subscribe(analyzer.on_signal)
 
     mapping = {0x123: [("counter", 0, "count")]}
@@ -42,6 +42,9 @@ def _run_pipeline(frames_path: Path, artifacts_dir: Path, *, speed: float) -> di
 
     replayer = FrameReplayer(frames_path, timing="none", speed=speed)
     replayed = replayer.run(frame_bus.publish)
+
+    normalizer.close()
+    analyzer.close()
 
     return {
         "frames_replayed": replayed,

@@ -167,6 +167,72 @@ class ProbCounterJump:
         delta = rng.randint(lo, hi)
         payload[0] = (payload[0] + delta) % 256
         return True
+    
+@dataclass(frozen=True)
+class ProbTemperatureSpike:
+
+    # With probability p, spike temperature (byte 0-1, deci-degC) on the target CAN ID.
+
+    p: float = 0.001
+    delta_range: Tuple[int, int] = (-50, 50)    # +/- 5.0C
+    target_can_id: int = 0x124
+
+    def maybe_apply(
+        self,
+        *,
+        rng: random.Random,
+        frame_index: int,
+        can_id: int,
+        payload: bytearray,
+        state: Dict[str, Any],
+    ) -> bool:
+        if can_id != self.target_can_id:
+            return False
+        if rng.random() >= self.p:
+            return False
+
+        lo, hi = self.delta_range
+        delta = 0
+        while delta == 0:
+            delta = rng.randint(lo, hi)
+        
+        t = int.from_bytes(payload[0:2], byteorder="little", signed=False)
+        t2 = max(0, min(0xFFFF, t + delta))
+        payload[0:2] = int(t2).to_bytes(2, byteorder="little", signed=False)
+        return True
+    
+@dataclass(frozen=True)
+class ProbVoltageSpike:
+    
+    # With probability p, spike voltage (bytes 0-1, millivolts) on the target CAN ID.
+
+    p: float = 0.001
+    delta_range: Tuple[int, int] = (-1200, 1200)  # +/- 1.2V
+    target_can_id: int = 0x125
+
+    def maybe_apply(
+        self,
+        *,
+        rng: random.Random,
+        frame_index: int,
+        can_id: int,
+        payload: bytearray,
+        state: Dict[str, Any],
+    ) -> bool:
+        if can_id != self.target_can_id:
+            return False
+        if rng.random() >= self.p:
+            return False
+
+        lo, hi = self.delta_range
+        delta = 0
+        while delta == 0:
+            delta = rng.randint(lo, hi)
+
+        mv = int.from_bytes(payload[0:2], byteorder="little", signed=False)
+        mv2 = max(0, min(0xFFFF, mv + delta))
+        payload[0:2] = int(mv2).to_bytes(2, byteorder="little", signed=False)
+        return True
 
 
 # -------------------------
@@ -250,7 +316,7 @@ def create_traffic_generator(
     profile: Profile = "single",
     period_ms: int = 20,
     seed: Optional[int] = None,
-    p_counter_jump: float = 0.001,
+    anomaly_rate: float = 0.001,
 ) -> TrafficGenerator:
     # Stable factory API for demo scripts.
 
@@ -267,11 +333,17 @@ def create_traffic_generator(
 
     anomalies: List[Anomaly] = []
     if scenario == "noisy":
-        if p_counter_jump < 0.0 or p_counter_jump > 1.0:
-            raise ValueError("p_counter_jump must be between 0.0 and 1.0")
-        if p_counter_jump > 0.0:
+        if anomaly_rate < 0.0 or anomaly_rate > 1.0:
+            raise ValueError("anomaly_rate must be between 0.0 and 1.0")
+        if anomaly_rate > 0.0:
             anomalies.append(
-                ProbCounterJump(p=p_counter_jump, delta_range=(10, 80), target_can_id=0x123)
+                ProbCounterJump(p=anomaly_rate, delta_range=(10, 80), target_can_id=0x123)
+            )
+            anomalies.append(
+                ProbTemperatureSpike(p=anomaly_rate, delta_range=(-50, 50), target_can_id=0x124)
+            )
+            anomalies.append(
+                ProbVoltageSpike(p=anomaly_rate, delta_range=(-1200, 1200), target_can_id=0x125)
             )
 
     return TrafficGenerator(

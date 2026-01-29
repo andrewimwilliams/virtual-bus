@@ -19,7 +19,7 @@ def _run_pipeline(
     duration_s: float = 0.25,
     period_ms: int = 1,
     seed: int | None = None,
-    p_counter_jump: float = 0.0,
+    anomaly_rate: float = 0.0,
 ) -> tuple[int, int, int, Path]:
 
     # Returns: (frames_written, signals_written, events_written, artifacts_dir)
@@ -33,7 +33,12 @@ def _run_pipeline(
     observer = Observer(artifacts_dir)
     frame_bus.subscribe(observer.on_frame)
 
-    analyzer = Analyzer(artifacts_dir, watch_signal="counter")
+    # Watch relevant signals for the chosen profile.
+    if profile == "single":
+        watch = {"counter"}
+    else:
+        watch = {"counter", "temperature_deciC", "voltage_mv"}
+    analyzer = Analyzer(artifacts_dir, watch_signals=watch)
     signal_bus.subscribe(analyzer.on_signal)
 
     # Mapping that matches Normalizer + generator:
@@ -56,7 +61,7 @@ def _run_pipeline(
         profile=profile,          # "single" or "multi"
         period_ms=period_ms,      # fast tests
         seed=seed,                # deterministic when needed
-        p_counter_jump=p_counter_jump,
+        anomaly_rate=anomaly_rate,
     )
     gen.run(frame_bus.publish, duration_s=duration_s)
 
@@ -72,7 +77,7 @@ def test_clean_run_produces_no_events(tmp_path: Path) -> None:
         tmp_path,
         mode="clean",
         profile="single",
-        p_counter_jump=0.0,
+        anomaly_rate=0.0,
     )
     assert frames > 0
     assert signals > 0
@@ -84,7 +89,7 @@ def test_clean_multi_signals_match_frames_and_are_ok(tmp_path: Path) -> None:
         tmp_path,
         mode="clean",
         profile="multi",
-        p_counter_jump=0.0,
+        anomaly_rate=0.0,
     )
 
     assert frames > 0
@@ -114,7 +119,7 @@ def test_noisy_run_produces_events(tmp_path: Path) -> None:
         profile="multi",
         duration_s=0.25,
         seed=123,
-        p_counter_jump=0.25,
+        anomaly_rate=0.25,
     )
     assert frames > 0
     assert signals == frames

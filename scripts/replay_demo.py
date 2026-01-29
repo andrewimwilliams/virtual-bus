@@ -52,7 +52,7 @@ def main() -> None:
     frame_bus: Bus[Frame] = Bus()
     signal_bus: Bus[Signal] = Bus()
 
-    analyzer = Analyzer(artifacts_dir, watch_signal="counter")
+    analyzer = Analyzer(artifacts_dir, watch_signals="counter")
     signal_bus.subscribe(analyzer.on_signal)
 
     mapping = {0x123: [("counter", 0, "count")]}

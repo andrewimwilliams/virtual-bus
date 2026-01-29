@@ -27,10 +27,12 @@ def main() -> None:
         help="Traffic profile: single CAN ID (counter only) or multi CAN IDs (richer signals).",
     )
     parser.add_argument(
+        "--anomaly-rate",
         "--p-counter-jump",
+        dest="anomaly_rate",
         type=float,
         default=0.001,
-        help="Probability per eligible counter frame to inject a counter jump (noisy mode only).",
+        help="Probability per frame (per CAN ID) to inject an ID-specific anomaly (noisy mode only).",
     )
     parser.add_argument("--seed", type=int, default=None, help="Optional RNG seed (useful for reproducible noisy runs).")
     parser.add_argument("--duration-s", type=float, default=2.5, help="Demo duration in seconds.")
@@ -48,7 +50,7 @@ def main() -> None:
     observer = Observer(artifacts_dir)
     frame_bus.subscribe(observer.on_frame)
 
-    analyzer = Analyzer(artifacts_dir, watch_signal="counter")
+    analyzer = Analyzer(artifacts_dir)
     signal_bus.subscribe(analyzer.on_signal)
 
     if args.profile == "single":
@@ -72,7 +74,7 @@ def main() -> None:
         profile=args.profile,
         period_ms=args.period_ms,
         seed=args.seed,
-        p_counter_jump=args.p_counter_jump,
+        anomaly_rate=args.anomaly_rate,
     )
     sent = gen.run(frame_bus.publish, duration_s=args.duration_s)
 
@@ -81,9 +83,9 @@ def main() -> None:
     print("=== Demo complete ===")
     print(f"Mode:             {args.mode}")
     if args.mode == "noisy":
-        print(f"Anomaly rate:     {args.p_counter_jump}")
+        print(f"Anomaly rate:     {args.anomaly_rate}")
     else :
-        print(f"Anomaly rate:     {"0"}")
+        print(f"Anomaly rate:     0.0")
     print(f"Profile:          {args.profile}")
     print(f"Seed:             {args.seed}")
     print(f"Frames sent:      {sent}")
