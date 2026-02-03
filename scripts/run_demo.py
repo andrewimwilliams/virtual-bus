@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import time
+import json
 from pathlib import Path
+from datetime import datetime, timezone
 
 from virtual_bus.bus.bus import Bus
 from virtual_bus.bus.types import Frame, Signal
@@ -11,6 +13,12 @@ from virtual_bus.bus.generator import create_traffic_generator
 from virtual_bus.bus.normalizer import Normalizer
 from virtual_bus.bus.analyzer import Analyzer
 
+
+def nice_path(path: Path, base: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(base.resolve()))
+    except Exception:
+        return str(path)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run virtual-bus demo pipeline.")
@@ -28,8 +36,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--anomaly-rate",
-        "--p-counter-jump",
-        dest="anomaly_rate",
         type=float,
         default=0.001,
         help="Probability per frame (per CAN ID) to inject an ID-specific anomaly (noisy mode only).",
@@ -66,6 +72,27 @@ def main() -> None:
             0x125: [("voltage_mv", "u16_le", 0, "mV")],
         }
 
+    meta = {
+        "schema_version": 1,
+        "tool": "run_demo",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+
+        # run config
+        "mode": args.mode,
+        "profile": args.profile,
+        "seed": args.seed,
+        "duration_s": args.duration_s,
+        "period_ms": args.period_ms,
+        "anomaly_rate": (args.anomaly_rate if args.mode == "noisy" else 0.0),
+
+        "mapping": mapping,
+    }
+
+    (meta_path := artifacts_dir / "run_meta.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
     normalizer = Normalizer(artifacts_dir, mapping, publish_signal=signal_bus.publish)
     frame_bus.subscribe(normalizer.on_frame)
 
@@ -80,6 +107,10 @@ def main() -> None:
 
     elapsed = time.perf_counter() - start
 
+    frames_path = artifacts_dir / "frames.jsonl"
+    signals_path = artifacts_dir / "signals.jsonl"
+    events_path = artifacts_dir / "events.jsonl"
+
     print("=== Demo complete ===")
     print(f"Mode:             {args.mode}")
     if args.mode == "noisy":
@@ -89,9 +120,9 @@ def main() -> None:
     print(f"Profile:          {args.profile}")
     print(f"Seed:             {args.seed}")
     print(f"Frames sent:      {sent}")
-    print(f"Frames stored:    {observer.count}  -> {artifacts_dir / 'frames.jsonl'}")
-    print(f"Signals stored:   {normalizer.count} -> {artifacts_dir / 'signals.jsonl'}")
-    print(f"Events stored:    {analyzer.count}   -> {artifacts_dir / 'events.jsonl'}")
+    print(f"Frames stored:    {observer.count}  -> {nice_path(frames_path, root)}")
+    print(f"Signals stored:   {normalizer.count}  -> {nice_path(signals_path, root)}")
+    print(f"Events stored:    {analyzer.count}    -> {nice_path(events_path, root)}")
     print(f"Elapsed time:     {elapsed:.3f} s")
 
 
