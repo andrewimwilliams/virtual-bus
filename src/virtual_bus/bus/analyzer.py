@@ -3,22 +3,41 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Dict
 
-from .types import Event, Signal
+from .types import Event, Signal, FeedRecord
 from .jsonl import JsonlWriter
 
 
 class Analyzer:
-    # Minimal rule-based analyzer:
-    # - Detects if an 8-bit counter jumps by more than +1 (mod 256).
     
     def __init__(self, artifacts_dir: Path, watch_signals: Optional[set[str]] = None) -> None:
-        # If None, analyze all signals
         self.watch_signals = watch_signals
+        self.feed_writer = JsonlWriter(artifacts_dir / "feed.jsonl")
         self.writer = JsonlWriter(artifacts_dir / "events.jsonl")
         self._last_by_name: Dict[str, int] = {}
         self.count = 0
+        self.feed_count = 0
 
     def on_signal(self, sig: Signal) -> None:
+        rec = FeedRecord(
+            timestamp_ns=sig.timestamp_ns,
+            record_type="SIGNAL",
+            severity="INFO" if sig.quality == "OK" else "WARN",
+            subject=sig.name,
+            details={
+                "value": sig.value,
+                "units": sig.units,
+                "quality": sig.quality,
+                "source_can_id": sig.source_can_id,
+                "source_channel": sig.source_channel,
+                "source_node": sig.source_node,
+                "meta": sig.meta,
+            },
+        )
+
+        self.feed_writer.append(rec.to_dict())
+
+        self.feed_count += 1
+
         if sig.quality != "OK":
             return
         if self.watch_signals is not None and sig.name not in self.watch_signals:
@@ -37,7 +56,14 @@ class Analyzer:
                         event_type="COUNTER_JUMP",
                         severity="WARN",
                         subject=sig.name,
-                        details={"last": last, "expected": expected, "got": v},
+                        details={
+                            "last": last,
+                            "expected": expected,
+                            "got": v,
+                            "units": sig.units,
+                            "source_can_id": sig.source_can_id,
+                            "source_node": sig.source_node,
+                        },
                     )
                     self.writer.append(ev.to_dict())
                     self.count += 1
@@ -55,7 +81,14 @@ class Analyzer:
                         event_type="TEMP_SPIKE",
                         severity="WARN",
                         subject=sig.name,
-                        details={"last": last, "got": v, "delta_deciC": dv},
+                        details={
+                            "last": last,
+                            "got": v,
+                            "delta_deciC": dv,
+                            "units": sig.units,
+                            "source_can_id": sig.source_can_id,
+                            "source_node": sig.source_node,
+                        },
                     )
                     self.writer.append(ev.to_dict())
                     self.count += 1
@@ -72,7 +105,14 @@ class Analyzer:
                         event_type="VOLTAGE_SPIKE",
                         severity="WARN",
                         subject=sig.name,
-                        details={"last": last, "got": v, "delta_mv": dv},
+                        details={
+                            "last": last,
+                            "got": v,
+                            "delta_mv": dv,
+                            "units": sig.units,
+                            "source_can_id": sig.source_can_id,
+                            "source_node": sig.source_node,
+                        },
                     )
                     self.writer.append(ev.to_dict())
                     self.count += 1
@@ -84,3 +124,4 @@ class Analyzer:
 
     def close(self) -> None:
         self.writer.close()
+        self.feed_writer.close()

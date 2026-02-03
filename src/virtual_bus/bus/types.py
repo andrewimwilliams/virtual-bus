@@ -3,18 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Union, Literal
 
+# CAN Constants
 
-# -----------------------------
-# Constants (Classic CAN)
-# -----------------------------
 CAN_STD_ID_MAX = 0x7FF          # 11-bit
 CAN_EXT_ID_MAX = 0x1FFFFFFF     # 29-bit
 CAN_CLASSIC_MAX_DLC = 8
 
 
-# -----------------------------
 # Helpers
-# -----------------------------
+
 def _bytes_to_hex(data: bytes) -> str:
     return data.hex()
 
@@ -28,9 +25,8 @@ def _hex_to_bytes(hex_str: str) -> bytes:
     return bytes.fromhex(s)
 
 
-# -----------------------------
 # Core Data Types
-# -----------------------------
+
 @dataclass(frozen=True, slots=True)
 class Frame:
 
@@ -166,7 +162,7 @@ class Event:
     timestamp_ns: int
     event_type: str
     severity: Literal["INFO", "WARN", "ERROR"] = "INFO"
-    subject: Optional[str] = None  # e.g., signal name or can_id as string
+    subject: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
     run_id: Optional[str] = None
 
@@ -196,3 +192,29 @@ class Event:
             details=dict(d.get("details", {})),
             run_id=d.get("run_id"),
         )
+
+@dataclass(frozen=True, slots=True)
+class FeedRecord:
+
+    # A UI-friendly log entry for every Signal, shaped like Event.
+
+    timestamp_ns: int
+    record_type: str = "FEED"  # distinguish from analysis events
+    severity: Literal["INFO", "WARN", "ERROR"] = "INFO"
+    subject: Optional[str] = None
+    details: Dict[str, Any] = field(default_factory=dict)
+    run_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.timestamp_ns < 0:
+            raise ValueError("timestamp_ns must be non-negative")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "timestamp_ns": self.timestamp_ns,
+            "event_type": self.record_type,
+            "severity": self.severity,
+            "subject": self.subject,
+            "details": self.details,
+            "run_id": self.run_id,
+        }
