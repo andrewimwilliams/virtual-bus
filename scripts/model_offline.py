@@ -36,8 +36,7 @@ def main() -> int:
         model,
         args.input,
         k=args.k,
-        min_samples=args.min_samples,
-        emit_info_summary=True,
+        min_samples=args.min_samples
     )
 
     # Write output

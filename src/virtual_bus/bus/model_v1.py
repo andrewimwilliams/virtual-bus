@@ -9,6 +9,55 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from .types import Signal, Event
 
 
+DEFAULT_MIN_SAMPLES = 20
+
+"""
+Model V1 – Offline Signal Anomaly Detection
+===========================================
+
+This module implements the first version (V1) of the offline machine learning layer for the virtual bus pipeline.
+
+Scope & Intent
+--------------
+V1 is intentionally conservative and infrastructure-focused. Its goals are:
+- Validate ML plumbing without changing existing analyzer behavior
+- Learn "normal" behavior strictly from clean signals.jsonl
+- Produce deterministic, explainable anomaly events
+- Achieve parity with rule-based detection for simple invariants (e.g. counters)
+- Minimize false positives on clean data
+
+What V1 Does
+------------
+- Learns robust statistics (median + MAD) over *first-differences* of signals
+- Models behavior per signal name (future versions will extend this key)
+- Special-cases counter-like signals using modulo increment logic
+- Flags anomalies when observed deltas deviate significantly from learned norms
+- Operates fully offline; does not modify analyzer.py or the main pipeline
+
+What V1 Does NOT Do
+-------------------
+- Model cross-signal relationships
+- Perform forecasting or temporal sequence modeling
+- Learn value distributions (only deltas)
+- Coalesce anomaly bursts
+- Replace rule-based analysis
+
+Assumptions
+-----------
+- Signals intended for ML learning must appear as repeated time-series entries
+- Clean data is representative of normal system behavior
+- Thresholds are intentionally high to favor precision over recall
+
+Future Extensions (V2+)
+-----------------------
+- Learn per-(signal name, CAN ID) behavior
+- Incorporate value-based anomaly detection
+- Add burst coalescing and severity scaling
+- Integrate into online two-stage analysis pipeline
+
+This file is designed to be extended, not rewritten.
+"""
+
 def _iter_jsonl(path: Path) -> Iterator[dict]:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -88,7 +137,7 @@ class ModelV1:
         )
 
 
-def train_model_from_signals(signals_jsonl: Path, *, min_samples: int = 200) -> Tuple[ModelV1, Dict[str, Any]]:
+def train_model_from_signals(signals_jsonl: Path, *, min_samples: int = DEFAULT_MIN_SAMPLES) -> Tuple[ModelV1, Dict[str, Any]]:
     # Gather deltas per signal name
     last_by_name: Dict[str, Tuple[int, float]] = {}  # name -> (timestamp_ns, value)
     deltas: Dict[str, List[float]] = {}
@@ -141,8 +190,7 @@ def score_signals_to_events(
     signals_jsonl: Path,
     *,
     k: float = 8.0,
-    min_samples: int = 200,
-    emit_info_summary: bool = True,
+    min_samples: int = DEFAULT_MIN_SAMPLES,
 ) -> Iterator[dict]:
     # MAD -> robust sigma approx: 1.4826 * MAD (for normal-like distributions)
     last_by_name: Dict[str, float] = {}
