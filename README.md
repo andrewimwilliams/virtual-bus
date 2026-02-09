@@ -114,6 +114,38 @@ Golden tests assert that a known input recording produces exactly the same signa
 Fixtures live in `tests/fixtures`.
 
 ---
+## Offline ML Analysis (Current State)
+
+In addition to rule-based analysis, this project includes an **offline machine learning analysis path** designed to learn and detect anomalous signal behavior without modifying the live pipeline.
+
+The ML system operates strictly offline and follows a two-phase workflow:
+
+1. **Training (Clean Data Only)**  
+   A baseline model is trained using `signals.jsonl` generated from a *clean* simulation run.  
+   The model learns what “normal” looks like by analyzing **first-differences (deltas)** of signals, scoped per `(source CAN ID, signal name)`.
+
+2. **Inference (Noisy or Replayed Data)**  
+   The trained model is then applied to a separate `signals.jsonl` file (noisy or replayed data) to flag anomalous behavior.
+
+This workflow is intentionally conservative:
+- The ML model does **not** replace the analyzer.
+- It does **not** run online or adapt at runtime.
+- It produces a parallel event stream (`model_events.jsonl`) for comparison and validation.
+
+### Design Intent
+The current ML implementation (Model V1) is infrastructure-focused. Its goals are to:
+- Validate ML plumbing and data contracts
+- Produce deterministic, explainable events
+- Match existing analyzer behavior for simple invariants (counters and spike rules)
+- Avoid false positives on clean data
+
+This allows direct parity checks between:
+- `events.jsonl` (rules-based analyzer)
+- `model_events.jsonl` (ML-based analysis)
+
+Future versions may intentionally diverge once parity and confidence are established.
+
+---
 ## Design principles
 - Deterministic behavior over realism
 - Explicit data contracts over hidden logic

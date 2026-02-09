@@ -11,52 +11,51 @@ from .types import Signal, Event
 
 DEFAULT_MIN_SAMPLES = 20
 
+_MIN_DEV_BY_NAME = {
+    "temperature_deciC": 5.0,
+    "voltage_mv": 100.0,
+}
+
 """
 Model V1 – Offline Signal Anomaly Detection
 ===========================================
 
-This module implements the first version (V1) of the offline machine learning layer for the virtual bus pipeline.
+V1 implements a conservative, offline ML layer for the virtual bus pipeline.
+Its primary purpose is to validate ML plumbing and event semantics without
+changing or replacing the existing rule-based analyzer.
 
-Scope & Intent
---------------
-V1 is intentionally conservative and infrastructure-focused. Its goals are:
-- Validate ML plumbing without changing existing analyzer behavior
-- Learn "normal" behavior strictly from clean signals.jsonl
+Design Goals
+------------
+- Learn "normal" behavior exclusively from clean signals.jsonl
 - Produce deterministic, explainable anomaly events
-- Achieve parity with rule-based detection for simple invariants (e.g. counters)
+- Match analyzer behavior for simple invariants (e.g., counters, spike rules)
 - Minimize false positives on clean data
 
-What V1 Does
-------------
-- Learns robust statistics (median + MAD) over *first-differences* of signals
-- Models behavior per signal name (future versions will extend this key)
-- Special-cases counter-like signals using modulo increment logic
-- Flags anomalies when observed deltas deviate significantly from learned norms
-- Operates fully offline; does not modify analyzer.py or the main pipeline
+Approach
+--------
+- Learn robust statistics (median + MAD) over first-differences (deltas)
+- Model behavior per (source CAN ID, signal name)
+- Special-case counters using modulo increment rules
+- Mirror analyzer spike thresholds when appropriate
+- Operate fully offline; no impact to the main pipeline
 
-What V1 Does NOT Do
--------------------
-- Model cross-signal relationships
-- Perform forecasting or temporal sequence modeling
-- Learn value distributions (only deltas)
-- Coalesce anomaly bursts
-- Replace rule-based analysis
+Non-Goals
+---------
+- Forecasting or temporal modeling
+- Cross-signal correlation
+- Online inference or replacement of analyzer logic
 
-Assumptions
------------
-- Signals intended for ML learning must appear as repeated time-series entries
-- Clean data is representative of normal system behavior
-- Thresholds are intentionally high to favor precision over recall
-
-Future Extensions (V2+)
------------------------
-- Learn per-(signal name, CAN ID) behavior
-- Incorporate value-based anomaly detection
-- Add burst coalescing and severity scaling
-- Integrate into online two-stage analysis pipeline
-
-This file is designed to be extended, not rewritten.
+Future Work (V2+)
+-----------------
+- Value-based anomaly detection
+- Burst coalescing and severity scaling
+- Integration into a two-stage (rules + ML) pipeline
 """
+
+def _model_key(sig: Signal) -> str:
+    # Keyed per CAN ID and signal name so multiple streams don't collide
+    # Keep string for JSON-serializable dict keys
+    return f"{sig.source_can_id}:{sig.name}"
 
 def _iter_jsonl(path: Path) -> Iterator[dict]:
     with path.open("r", encoding="utf-8") as f:
@@ -95,14 +94,39 @@ def _mad(xs: List[float], med: float) -> float:
     return _median(dev)
 
 
+def _percentile(xs: List[float], p: float) -> float:
+    # p in [0, 100]
+    if not xs:
+        return 0.0
+    xs = sorted(xs)
+    if p <= 0:
+        return float(xs[0])
+    if p >= 100:
+        return float(xs[-1])
+    k = (len(xs) - 1) * (p / 100.0)
+    f = math.floor(k)
+    c = math.ceil(k)
+    if f == c:
+        return float(xs[int(k)])
+    d0 = float(xs[f]) * (c - k)
+    d1 = float(xs[c]) * (k - f)
+    return d0 + d1
+
+
 @dataclass
 class SignalDeltaStats:
     n: int
     median_delta: float
     mad_delta: float
+    abs_dev_p99: float  # Fallback tolerance when MAD==0
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"n": self.n, "median_delta": self.median_delta, "mad_delta": self.mad_delta}
+        return {
+            "n": self.n,
+            "median_delta": self.median_delta,
+            "mad_delta": self.mad_delta,
+            "abs_dev_p99": self.abs_dev_p99,
+        }
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "SignalDeltaStats":
@@ -110,6 +134,7 @@ class SignalDeltaStats:
             n=int(d["n"]),
             median_delta=float(d["median_delta"]),
             mad_delta=float(d["mad_delta"]),
+            abs_dev_p99=float(d.get("abs_dev_p99", 0.0)),
         )
 
 
@@ -138,8 +163,8 @@ class ModelV1:
 
 
 def train_model_from_signals(signals_jsonl: Path, *, min_samples: int = DEFAULT_MIN_SAMPLES) -> Tuple[ModelV1, Dict[str, Any]]:
-    # Gather deltas per signal name
-    last_by_name: Dict[str, Tuple[int, float]] = {}  # name -> (timestamp_ns, value)
+    # Gather deltas per (source CAN ID, signal name)
+    last_by_key: Dict[str, Tuple[int, float]] = {}  # name -> (timestamp_ns, value)
     deltas: Dict[str, List[float]] = {}
 
     total = 0
@@ -156,20 +181,28 @@ def train_model_from_signals(signals_jsonl: Path, *, min_samples: int = DEFAULT_
 
         v = float(sig.value)
         numeric += 1
-        last = last_by_name.get(sig.name)
+        key = _model_key(sig)
+        last = last_by_key.get(key)
         if last is not None:
             dv = v - last[1]
-            deltas.setdefault(sig.name, []).append(dv)
-        last_by_name[sig.name] = (sig.timestamp_ns, v)
+            deltas.setdefault(key, []).append(dv)
+        last_by_key[key] = (sig.timestamp_ns, v)
 
     per_signal: Dict[str, SignalDeltaStats] = {}
     kept = 0
-    for name, ds in deltas.items():
+    for key, ds in deltas.items():
         if len(ds) < min_samples:
             continue
         med = _median(ds)
         mad = _mad(ds, med)
-        per_signal[name] = SignalDeltaStats(n=len(ds), median_delta=med, mad_delta=mad)
+        abs_dev = [abs(d - med) for d in ds]
+        abs_dev_p99 = _percentile(abs_dev, 99.0)
+        per_signal[key] = SignalDeltaStats(
+            n=len(ds),
+            median_delta=med,
+            mad_delta=mad,
+            abs_dev_p99=abs_dev_p99,
+        )
         kept += 1
 
     model = ModelV1(per_signal=per_signal)
@@ -193,11 +226,8 @@ def score_signals_to_events(
     min_samples: int = DEFAULT_MIN_SAMPLES,
 ) -> Iterator[dict]:
     # MAD -> robust sigma approx: 1.4826 * MAD (for normal-like distributions)
-    last_by_name: Dict[str, float] = {}
-    last_ts_by_name: Dict[str, int] = {}
-
-    seen = 0
-    flagged = 0
+    last_by_key: Dict[str, float] = {}
+    last_ts_by_key: Dict[str, int] = {}
 
     for row in _iter_jsonl(signals_jsonl):
         sig = Signal.from_dict(row)
@@ -208,23 +238,21 @@ def score_signals_to_events(
 
         v = float(sig.value)
         name = sig.name
+        key = _model_key(sig)
 
-        last_v = last_by_name.get(name)
-        last_ts = last_ts_by_name.get(name)
-        last_by_name[name] = v
-        last_ts_by_name[name] = sig.timestamp_ns
+        last_v = last_by_key.get(key)
+        last_ts = last_ts_by_key.get(key)
+        last_by_key[key] = v
+        last_ts_by_key[key] = sig.timestamp_ns
 
         if last_v is None or last_ts is None:
             continue
 
-        seen += 1
-
-        # Special-case counter modulo behavior if present in model stats (or just by name)
+        # Special-case counter modulo behavior
         if name == "counter":
             expected = (int(last_v) + 1) % model.counter_mod
             got = int(v) % model.counter_mod
             if got != expected:
-                flagged += 1
                 ev = Event(
                     timestamp_ns=sig.timestamp_ns,
                     event_type="MODEL_COUNTER_JUMP",
@@ -235,6 +263,7 @@ def score_signals_to_events(
                         "expected": expected,
                         "got": got,
                         "rule": "mod_increment",
+                        "model_key": key,
                         "source_can_id": sig.source_can_id,
                         "source_node": sig.source_node,
                     },
@@ -242,7 +271,7 @@ def score_signals_to_events(
                 yield ev.to_dict()
             continue
 
-        stats = model.per_signal.get(name)
+        stats = model.per_signal.get(key)
         if stats is None or stats.n < min_samples:
             continue
 
@@ -250,12 +279,34 @@ def score_signals_to_events(
         med = stats.median_delta
         mad = stats.mad_delta
 
-        # If MAD is ~0, treat as "very stable": only flag huge deviations
         robust_sigma = 1.4826 * mad
         if robust_sigma < 1e-9:
-            # stable signal; only flag if dv deviates from median by a hard epsilon
-            if abs(dv - med) > 1.0:  # conservative; adjust later if needed
-                flagged += 1
+            # MAD==0: stable in clean. If this signal has an explicit analyzer-style spike rule,
+            # mirror it exactly: abs(dv) > threshold (strict >).
+            rule_thresh = _MIN_DEV_BY_NAME.get(name)
+            if rule_thresh is not None:
+                if abs(dv) > rule_thresh:
+                    ev = Event(
+                        timestamp_ns=sig.timestamp_ns,
+                        event_type="MODEL_DELTA_OUTLIER",
+                        severity="WARN",
+                        subject=name,
+                        details={
+                            "delta": dv,
+                            "rule_threshold": rule_thresh,
+                            "note": "MAD==0; analyzer parity (abs(delta) > threshold)",
+                            "model_key": key,
+                            "source_can_id": sig.source_can_id,
+                            "source_node": sig.source_node,
+                        },
+                    )
+                    yield ev.to_dict()
+                continue
+
+            # Otherwise: ML fallback using learned tolerance from clean run
+            tol = stats.abs_dev_p99
+            margin = 0.0 if tol >= 1.0 else 1.0
+            if abs(dv - med) > (tol + margin):
                 ev = Event(
                     timestamp_ns=sig.timestamp_ns,
                     event_type="MODEL_DELTA_OUTLIER",
@@ -267,7 +318,10 @@ def score_signals_to_events(
                         "mad_delta": mad,
                         "score": float("inf"),
                         "threshold_k": k,
-                        "note": "MAD~0; stable-signal heuristic",
+                        "note": "MAD==0; p99 abs-dev fallback",
+                        "abs_dev_p99": tol,
+                        "threshold": tol + margin,
+                        "model_key": key,
                         "source_can_id": sig.source_can_id,
                         "source_node": sig.source_node,
                     },
@@ -275,9 +329,9 @@ def score_signals_to_events(
                 yield ev.to_dict()
             continue
 
+        # Normal robust-z scoring path when MAD > 0
         score = abs(dv - med) / robust_sigma
         if score > k:
-            flagged += 1
             ev = Event(
                 timestamp_ns=sig.timestamp_ns,
                 event_type="MODEL_DELTA_OUTLIER",
@@ -290,6 +344,7 @@ def score_signals_to_events(
                     "robust_sigma": robust_sigma,
                     "score": score,
                     "threshold_k": k,
+                    "model_key": key,
                     "source_can_id": sig.source_can_id,
                     "source_node": sig.source_node,
                 },
