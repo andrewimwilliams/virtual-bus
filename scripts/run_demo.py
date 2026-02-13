@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import time
 import json
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -41,14 +42,17 @@ def main() -> None:
         help="Probability per frame (per CAN ID) to inject an ID-specific anomaly (noisy mode only).",
     )
     parser.add_argument("--seed", type=int, default=None, help="Optional RNG seed (useful for reproducible noisy runs).")
-    parser.add_argument("--duration-s", type=float, default=2.5, help="Demo duration in seconds.")
+    parser.add_argument("--duration-s", type=float, default=2.5, help="Demo duration in seconds, use 0 for infinite.")
     parser.add_argument("--period-ms", type=int, default=20, help="Generator period in milliseconds.")
     args = parser.parse_args()
 
     start = time.perf_counter()
     root = Path(__file__).resolve().parents[1]
-    artifacts_dir = root / "artifacts" / args.mode
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    # Keeps runs separated to never overwrite previous artifacts
+    artifacts_dir = root / "artifacts" / args.mode / args.profile / run_stamp
+    artifacts_dir.mkdir(parents=True, exist_ok=False)
 
     frame_bus: Bus[Frame] = Bus()
     signal_bus: Bus[Signal] = Bus()
@@ -103,7 +107,38 @@ def main() -> None:
         seed=args.seed,
         anomaly_rate=args.anomaly_rate,
     )
-    sent = gen.run(frame_bus.publish, duration_s=args.duration_s)
+
+    duration_s = args.duration_s
+    if duration_s <= 0:
+        duration_s = None  # infinite run
+
+    sent = 0
+    shutdown_event = threading.Event()
+
+    def run_generator():
+        nonlocal sent
+        sent = gen.run(
+            frame_bus.publish,
+            duration_s=duration_s,
+            should_stop=shutdown_event.is_set,   # NEW
+        )
+
+    thread = threading.Thread(target=run_generator)
+    thread.start()
+
+    try:
+        while thread.is_alive():
+            time.sleep(1.0)
+            if duration_s is None:
+                now = time.perf_counter()
+                print(f"[running] frames={observer.count} signals={normalizer.count} events={analyzer.count} uptime={now-start:.1f}s")
+    except KeyboardInterrupt:
+        print("\nInterrupted; shutting down...")
+        shutdown_event.set()
+        thread.join(timeout=5.0)
+        if thread.is_alive():
+            print("WARNING: generator thread did not stop; forcing exit.")
+            raise SystemExit(1)
 
     elapsed = time.perf_counter() - start
 

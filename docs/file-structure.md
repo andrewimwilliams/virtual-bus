@@ -5,23 +5,27 @@ virtual-bus/
 
     artifacts/
         clean/
-            events.jsonl            # Events flagged by analyzer (rules-based)
-            feed.jsonl              # Entire feed of processed signals
-            frames.jsonl            # Raw CAN data
-            model_events.jsonl      # Events flagged by ML model (inference-based)
-            model_report.json       # ML training metadata and report
-            run_meta.json           # Simulation metadata
-            signals.jsonl           # Normalized frames prepared for analyzer/ML model
+            single/{date_time}/
+            multi/{date_time}/
+                events.jsonl            # Events flagged by analyzer (rules-based)
+                feed.jsonl              # Entire feed of processed signals
+                frames.jsonl            # Raw CAN data
+                model_events.jsonl      # Events flagged by ML model (inference-based)
+                model_report.json       # ML training metadata and report
+                run_meta.json           # Simulation metadata
+                signals.jsonl           # Normalized frames prepared for analyzer/ML model
         models/
-            model_v1.json           # ML artifacts
+            model_v1.json               # ML artifacts
         noisy/
-            events.jsonl
-            feed.jsonl
-            frames.jsonl
-            model_events.jsonl
-            model_report.json       # ML report
-            run_meta.json
-            signals.jsonl
+            single/{date_time}/
+            multi/{date_time}/
+                events.jsonl
+                feed.jsonl
+                frames.jsonl
+                model_events.jsonl
+                model_report.json       # ML report
+                run_meta.json
+                signals.jsonl
 
     docs/
         architecture.md
@@ -31,24 +35,24 @@ virtual-bus/
 
     scripts/
         __init__.py
-        model_offline.py            # Train ML on clean signals, analyze noisy signals
-        replay_demo.py              # Execute past simulation by replaying frames
-        run_demo.py                 # Execute new simulation by generating frames
+        model_offline.py                # Train ML on clean signals, analyze noisy signals
+        replay_demo.py                  # Execute past simulation by replaying frames
+        run_demo.py                     # Execute new simulation by generating frames
 
     src/
         virtual_bus/
             __init__.py
             bus/
                 __init__.py
-                analyzer.py         # Rules-based analysis layer (signals -> events)
-                bus.py              # System-wide pub-sub communication method
-                generator.py        # CAN traffic generator (frames)
-                jsonl.py            # JSONL parser
-                model_v1.py         # ML model V1
-                normalizer.py       # Normalizer layer (frames -> signals)
-                observer.py         # Frame ingestor component
-                replayer.py         # Replay frames (deterministic generator)
-                types.py            # Data type definitions (frames, signals, events)
+                analyzer.py             # Rules-based analysis layer (signals -> events)
+                bus.py                  # System-wide pub-sub communication method
+                generator.py            # CAN traffic generator (frames)
+                jsonl.py                # JSONL parser
+                model_v1.py             # ML model V1
+                normalizer.py           # Normalizer layer (frames -> signals)
+                observer.py             # Frame ingestor component
+                replayer.py             # Replay frames (deterministic generator)
+                types.py                # Data type definitions (frames, signals, events)
 
     tests/
         fixtures/

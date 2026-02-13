@@ -270,7 +270,12 @@ class TrafficGenerator:
         self._rng = random.Random(self.seed)
         self._state_by_id: Dict[int, Dict[str, Any]] = {s.can_id: {} for s in self.sources}
 
-    def run(self, publish: Callable[[Frame], None], duration_s: float = 2.0) -> int:
+    def run(
+        self,
+        publish,
+        duration_s: Optional[float] = 2.0,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> int:
         start = time.perf_counter()
         sent = 0
 
@@ -278,13 +283,15 @@ class TrafficGenerator:
         if n == 0:
             return 0
 
-        while (time.perf_counter() - start) < duration_s:
-            # Round-robin across sources so total rate stays ~1/period_ms
+        # duration_s=None means run indefinitely until caller stops it.
+        while (duration_s is None) or ((time.perf_counter() - start) < duration_s):
+            if should_stop is not None and should_stop():
+                break
+
             src = self.sources[sent % n]
             state = self._state_by_id[src.can_id]
             payload = src.step(state, self._rng)
 
-            # Apply anomalies probabilistically
             for a in self.anomalies:
                 a.maybe_apply(
                     rng=self._rng,
@@ -308,6 +315,7 @@ class TrafficGenerator:
             self.clock.sleep(self.period_ms / 1000.0)
 
         return sent
+
 
 
 def create_traffic_generator(
