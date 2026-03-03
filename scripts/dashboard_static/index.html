@@ -1,0 +1,255 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Virtual Bus Dashboard</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; }
+    .card h2 { font-size: 14px; margin: 0 0 8px; }
+    #meta { white-space: pre; font-size: 12px; margin: 0; }
+    table { border-collapse: collapse; font-size: 12px; width: 100%; }
+    th, td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
+    .muted { color: #666; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, select, button { padding: 6px 8px; }
+    canvas { max-width: 100%; }
+  </style>
+</head>
+<body>
+  <h1 style="margin:0 0 12px;">Virtual Bus – Live Feed</h1>
+
+  <div class="controls card" style="margin-bottom:12px;">
+    <label>Mode:
+      <select id="mode">
+        <option value="clean">clean</option>
+        <option value="noisy">noisy</option>
+      </select>
+    </label>
+
+    <label>Profile:
+      <select id="profile">
+        <option value="single">single</option>
+        <option value="multi">multi</option>
+      </select>
+    </label>
+
+    <label class="muted">
+      <input type="checkbox" id="fromStart" />
+      start at beginning
+    </label>
+
+    <button id="connect">Connect</button>
+    <span id="status" class="muted">disconnected</span>
+  </div>
+
+  <div class="row">
+    <div class="card" style="flex: 1 1 380px;">
+      <h2>Latest Run</h2>
+      <pre id="meta">{}</pre>
+    </div>
+
+    <div class="card" style="flex: 2 1 520px;">
+      <h2>Live Value (first signal)</h2>
+      <canvas id="chart" height="120"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h2>Frames (latest 50)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>t (ms)</th>
+          <th>channel</th>
+          <th>can_id</th>
+          <th>dlc</th>
+          <th>data_hex</th>
+          <th>source</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    let ws = null;
+    let chart = null;
+    let activeRunDir = null;
+    let pollTimer = null;
+    let t0 = null;
+
+    const metaEl = document.getElementById("meta");
+    const rowsEl = document.getElementById("rows");
+    const statusEl = document.getElementById("status");
+
+    const modeEl = document.getElementById("mode");
+    const profileEl = document.getElementById("profile");
+    const fromStartEl = document.getElementById("fromStart");
+
+    const maxRows = 50;
+
+    function setStatus(s) { statusEl.textContent = s; }
+
+    function msFromNs(ns) {
+      // convert ns to ms; keep small readable number if you want delta later
+      return Math.round(Number(ns) / 1e6);
+    }
+
+    function addRow(frame) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${msFromNs(frame.timestamp_ns)}</td>
+        <td>${frame.channel ?? ""}</td>
+        <td>${frame.can_id ?? ""}</td>
+        <td>${frame.dlc ?? ""}</td>
+        <td>${frame.data_hex ?? ""}</td>
+        <td>${frame.source_node ?? ""}</td>
+      `;
+      rowsEl.prepend(tr);
+      while (rowsEl.children.length > maxRows) rowsEl.removeChild(rowsEl.lastChild);
+    }
+
+    function ensureChart() {
+      if (chart) return chart;
+      const ctx = document.getElementById("chart").getContext("2d");
+      chart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [{ label: "value", data: [] }],
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          scales: { x: { display: true }, y: { display: true } },
+          plugins: { legend: { display: true } }
+        }
+      });
+      return chart;
+    }
+
+    function pushPoint(xLabel, yValue) {
+      const c = ensureChart();
+      c.data.labels.push(xLabel);
+      c.data.datasets[0].data.push(yValue);
+      // keep last N points
+      const N = 200;
+      if (c.data.labels.length > N) {
+        c.data.labels.shift();
+        c.data.datasets[0].data.shift();
+      }
+      c.update();
+    }
+
+    async function loadLatest() {
+    const mode = modeEl.value;
+    const profile = profileEl.value;
+
+    const res = await fetch(`/api/latest?mode=${encodeURIComponent(mode)}&profile=${encodeURIComponent(profile)}`);
+    const obj = await res.json();
+    metaEl.textContent = JSON.stringify(obj, null, 2);
+    return obj;
+    }
+
+    function connectStream(streamName) {
+      const mode = modeEl.value;
+      const profile = profileEl.value;
+      const start_at_end = fromStartEl.checked ? "false" : "true";
+
+      const url = `ws://${location.host}/ws/stream?mode=${encodeURIComponent(mode)}&profile=${encodeURIComponent(profile)}&stream=${streamName}&start_at_end=${start_at_end}`;
+      ws = new WebSocket(url);
+
+      ws.onopen = () => setStatus(`connecting (${streamName})...`);
+      ws.onclose = () => {
+        stopAutoFollow();
+        setStatus("disconnected");
+      };
+      ws.onerror = () => setStatus("error");
+
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+
+        if (msg.type === "attached") {
+          activeRunDir = msg.run_dir;
+          setStatus(`connected (${streamName}) → ${activeRunDir}`);
+          return;
+        }
+
+        if (msg.type === "error") {
+          console.error(msg.message);
+          setStatus(`error: ${msg.message}`);
+          return;
+        }
+
+        if (msg.type === "data") {
+          const p = msg.payload;
+          if (streamName === "frames") addRow(p);
+          // chart update...
+        }
+      };
+    }
+
+    function teardownConnection() {
+      stopAutoFollow();
+      if (ws) {
+        try { ws.close(); } catch {}
+        ws = null;
+      }
+      rowsEl.innerHTML = "";
+      t0 = null;
+
+      if (chart) {
+        chart.destroy();
+        chart = null;
+      }
+    }
+
+    pollTimer = setInterval(async () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      if (document.hidden) return;
+
+      try {
+        const latest = await loadLatest();
+        const latestRun = latest.run_dir;
+
+        if (activeRunDir && latestRun && latestRun !== activeRunDir) {
+          console.log(`Run changed ${activeRunDir} -> ${latestRun}, reconnecting...`);
+          teardownConnection();
+          connectStream(streamName);
+        }
+      } catch (e) {
+        setStatus("poll error (see console)");
+        console.error(e);
+      }
+    }, 2000);
+
+    function stopAutoFollow() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    window.addEventListener("beforeunload", () => {
+      stopAutoFollow();
+      if (ws) ws.close();
+    });
+
+    document.getElementById("connect").onclick = async () => {
+    teardownConnection();
+
+    await loadLatest();
+    connectStream("frames");
+    startAutoFollow("frames");
+    };
+
+    // auto-load run info
+    loadLatest().catch(() => {});
+  </script>
+</body>
+</html>

@@ -15,6 +15,46 @@ from virtual_bus.bus.normalizer import Normalizer
 from virtual_bus.bus.analyzer import Analyzer
 
 
+def write_latest_pointer(parent_dir: Path, run_dir: Path) -> None:
+    # Atomically publish the most recent run directory for dashboards/tools.
+    # Overwrites: parent_dir / 'LATEST.json'
+
+    latest_path = parent_dir / "LATEST.json"
+    tmp_path = parent_dir / ".LATEST.json.tmp"
+
+    payload = {
+        "run_dir": run_dir.name,
+        "run_path": str(run_dir),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp_path.replace(latest_path)
+
+
+def resolve_latest_run(root: Path, mode: str, profile: str) -> Path:
+    parent = root / "artifacts" / mode / profile
+    latest_path = parent / "LATEST.json"
+
+    if not latest_path.exists():
+        raise FileNotFoundError(f"No LATEST.json found at {latest_path}")
+
+    payload = json.loads(latest_path.read_text(encoding="utf-8"))
+
+    # Prefer the absolute run_path if present, else reconstruct from run_dir
+    run_path = payload.get("run_path")
+    if run_path:
+        run_dir = Path(run_path)
+    else:
+        run_dir = parent / payload["run_dir"]
+
+    if not run_dir.exists():
+        raise FileNotFoundError(f"Latest run dir does not exist: {run_dir}")
+
+    return run_dir
+
+
 def nice_path(path: Path, base: Path) -> str:
     try:
         return str(path.resolve().relative_to(base.resolve()))
@@ -53,6 +93,9 @@ def main() -> None:
     # Keeps runs separated to never overwrite previous artifacts
     artifacts_dir = root / "artifacts" / args.mode / args.profile / run_stamp
     artifacts_dir.mkdir(parents=True, exist_ok=False)
+
+    parent_dir = artifacts_dir.parent
+    write_latest_pointer(parent_dir, artifacts_dir)
 
     frame_bus: Bus[Frame] = Bus()
     signal_bus: Bus[Signal] = Bus()
